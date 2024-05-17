@@ -39,8 +39,23 @@ def http_process_analysis(req: func.HttpRequest) -> func.HttpResponse:
         #----------------- get tables
         tables = []
         tables = extract_tables(analyzeResult)
-        item = {"tables":tables} if len(tables) > 0 else {"tables":[] }
-        results.append(item)
+
+        #combine all of the tables and their data into one object
+        json_table = []
+        contents_concat = ''
+        for i in tables:
+            for j in i:
+                item = {"heading":j['heading']['value'],"content":""}
+                for k in j['content']:
+                    contents_concat =contents_concat + k['value'] + '\n'
+                item['content'] = contents_concat
+                json_table.append(item)
+                contents_concat = ''
+                item = None
+            
+
+        #item = {"tables":tables} if len(tables) > 0 else {"tables":[] }
+        results.append({"combined_table_data":json.dumps(json_table)})
         #----------------- get selection marks
         selection_marks = get_selection_markes(analyzeResult=analyzeResult)
         results.append({"selectionMarks":selection_marks})
