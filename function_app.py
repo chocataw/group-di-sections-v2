@@ -1,3 +1,4 @@
+from datetime import datetime,date
 import azure.functions as func
 import logging
 import json
@@ -21,6 +22,10 @@ def http_process_analysis(req: func.HttpRequest) -> func.HttpResponse:
         analyzeResult = ""
         if 'analyzeResult' in json_data:
             analyzeResult = json_data['analyzeResult']
+        #get date analyzed
+        if 'createdDateTime' in json_data:
+            date_analyzed = {"dateAnalyzed":json_data['createdDateTime'].split('T')[0] } 
+            results.append(date_analyzed)
         #----------------- get entire content
         if 'content' in analyzeResult:
             fullContent = analyzeResult['content']
@@ -36,12 +41,11 @@ def http_process_analysis(req: func.HttpRequest) -> func.HttpResponse:
         tables = extract_tables(analyzeResult)
         item = {"tables":tables} if len(tables) > 0 else {"tables":[] }
         results.append(item)
-
+        #----------------- get selection marks
+        selection_marks = get_selection_markes(analyzeResult=analyzeResult)
+        results.append({"selectionMarks":selection_marks})
             
         #----------------- get paragraphs
-        if 'paragraphs' in analyzeResult:
-            paragraphs = analyzeResult['paragraphs']
-
         paragraphs = analyzeResult['paragraphs'] if 'paragraphs' in analyzeResult else None
         #----------------- filter and group headings and content paragraphs - remove the items that exist in the tables
         section = []
@@ -60,33 +64,47 @@ def http_process_analysis(req: func.HttpRequest) -> func.HttpResponse:
             #group the sections
             selected_paragraph_items = select_from_paragraphs(filteredParagraphs)
             grouped_sections = groupSections(selected_paragraph_items)
-
+            #TODO: Update to include value for selection marks using offset and pageNumber
             sections = {"sections":grouped_sections}
             results.append(sections)
 
-        finalResult = {"results":results}
+        finalResult = {"contentResults":results}
         #results.append(sections)
         return func.HttpResponse(json.dumps(finalResult),status_code=200)
     else:
         return func.HttpResponse("Object analyzeResult was missing from the body.",status_code=500)  
     
 #functions
+def get_selection_markes(analyzeResult:json):
+    selection_marks = []
+    index = 0
+    if 'pages' in analyzeResult and len(analyzeResult['pages']) > 0:
+        for page in analyzeResult['pages']:
+            if 'selectionMarks' in page and len(page['selectionMarks']) > 0:
+                for mark in page['selectionMarks']:
+                    item = None
+                    item = {"state": mark['state'],"offset":mark['span']['offset'],"pageNumber":page['pageNumber']}
+                    selection_marks.append(item)
+    return selection_marks
+
 def get_figures(analyzeResult: json):
     figures_json = []
     index = 0
-    for figure in analyzeResult['figures']:
-        item = None
-        #----------------- take the index of the figure from the split element
-        # if 'elements' in figure:
-        #     for s in figure['elements']:            
-        #         element_index =int(s.split('/')[2])
-        #         item = {"element":s,"index":index,"page":figure['boundingRegions'][0]['pageNumber'],"offset":figure['spans'][0]['offset'],"length":figure['spans'][0]['length']}
-        #         figures_json.append(item)
-        #         index += 1
-        # else:
-        item = {"index":index,"page":figure['boundingRegions'][0]['pageNumber'],"offset":figure['spans'][0]['offset'],"length":figure['spans'][0]['length']}
-        figures_json.append(item)
-        index += 1
+    if 'figures' in analyzeResult and len(analyzeResult['figures'])>0:
+        for figure in analyzeResult['figures']:
+            item = None
+            #----------------- take the index of the figure from the split element
+            # if 'elements' in figure:
+            #     for s in figure['elements']:            
+            #         element_index =int(s.split('/')[2])
+            #         item = {"element":s,"index":index,"page":figure['boundingRegions'][0]['pageNumber'],"offset":figure['spans'][0]['offset'],"length":figure['spans'][0]['length']}
+            #         figures_json.append(item)
+            #         index += 1
+            # else:
+            item = {"index":index,"page":figure['boundingRegions'][0]['pageNumber'],"offset":figure['spans'][0]['offset'],"length":figure['spans'][0]['length']}
+            figures_json.append(item)
+            index += 1
+
     return figures_json
 
 def select_from_paragraphs(paragraphs: json):
@@ -96,14 +114,43 @@ def select_from_paragraphs(paragraphs: json):
         current_paragraph = None
         if 'role' in paragraph:
 
-            current_paragraph = {paragraph['role'] : paragraph['content']}
+            current_paragraph = {paragraph['role'] : paragraph['content'],
+                                 "pageNumber":paragraph['boundingRegions'][0]['pageNumber'],
+                                 "offset":paragraph['spans'][0]['offset']}
             #json.loads(str(paragraph['role']) + ":" + str(paragraph['content']))
             selected_paragraphs.append(current_paragraph)
             current_paragraph = None
         else:
-            current_paragraph= {"sectionContent" : paragraph['content']}
-            selected_paragraphs.append(current_paragraph)
-            current_paragraph = None
+            if ':selected:' in paragraph['content'] or ':unselected:' in paragraph['content']:
+                #split the string
+                p_split = paragraph['content'].split(':')
+                heading = p_split[0].strip()
+                current_paragraph = {"selectionHeading":heading,
+                                     "pageNumber":paragraph['boundingRegions'][0]['pageNumber'],
+                                    "offset":paragraph['spans'][0]['offset'],"sectionContent":[]}
+
+                for i in range(len(p_split)):
+                    if p_split[i] == 'selected' or p_split[i] =='unselected':
+                        #append the next index
+                        current_paragraph['sectionContent'].append({p_split[i].strip():p_split[i+1].strip()})
+                   
+                # p_split = paragraph['content'].split(':selected:')
+                # selected =p_split[1].strip()
+                # p_split = paragraph['content'].split(':unselected:')
+                # unselected = p_split[1].strip()
+                # current_paragraph = {"SelectionHeading":heading,
+                #                      "sectionContent":[{"Selected":selected},
+                #                      {"pageNumber":paragraph['boundingRegions'][0]['pageNumber']},
+                #                     {"offset":paragraph['spans'][0]['offset']},
+                #                                        {"Unselected":unselected}]}
+                selected_paragraphs.append(current_paragraph)
+                current_paragraph = None
+            else: 
+                current_paragraph= {"sectionContent" : paragraph['content'],
+                                    "pageNumber":paragraph['boundingRegions'][0]['pageNumber'],
+                                    "offset":paragraph['spans'][0]['offset']}
+                selected_paragraphs.append(current_paragraph)
+                current_paragraph = None
 
     return selected_paragraphs
 
@@ -282,7 +329,21 @@ def groupSections(json_data: dict):
                     results.append(current_section_content)
                 current_section_heading = item['sectionHeading']
                 current_section_content = None
+            
+            elif 'selectionHeading' in item:
+                if 'current_section_content' in locals() and current_section_content:
+                    results.append(current_section_content)
+                current_section_content = None
+                current_section_heading = None
+                current_section_heading = item['selectionHeading']
+                current_section_content = {"sectionHeading":current_section_heading,"pageNumber":item['pageNumber'],
+                                           "offset":item['offset'],
+                                           "sectionContent":item['sectionContent']}
+                results.append(current_section_content)
+                current_section_content = None
+                current_section_heading = None
                 
+
             elif 'sectionContent' in item:
                 logging.info(f'Checking if section content is associated with a heading.')
                 if 'current_section_heading' in locals() and current_section_heading:
@@ -308,6 +369,7 @@ def groupSections(json_data: dict):
                         "pageNumber": current_page,
                         "content": [item['sectionContent']]
                     }
+                    results.append(current_section_content)
             else:
                 continue
         logging.info(f'Apply last append of current_section_content')
