@@ -45,7 +45,7 @@ def http_process_analysis(req: func.HttpRequest) -> func.HttpResponse:
         contents_concat = ''
         for i in tables:
             for j in i:
-                item = {"heading":j['heading']['value'],"content":""}
+                item = {"heading":j['heading']['value'],"content":"","pageNumber":j['heading']['pageNumber']}
                 for k in j['content']:
                     contents_concat =contents_concat + k['value'] + '\n'
                 item['content'] = contents_concat
@@ -346,6 +346,13 @@ def groupSections(json_data: dict):
                 current_section_content = None
             
             elif 'selectionHeading' in item:
+                selection_content = ''
+                for i in item['sectionContent']:
+                    if 'selected' in i:
+                        selection_content = selection_content + 'selected: '+ selection_content +  i['selected'] + ': '
+                    if 'unselected' in i:
+                        selection_content = selection_content + 'unselected: ' + i['unselected'] + ': '
+
                 if 'current_section_content' in locals() and current_section_content:
                     results.append(current_section_content)
                 current_section_content = None
@@ -353,7 +360,8 @@ def groupSections(json_data: dict):
                 current_section_heading = item['selectionHeading']
                 current_section_content = {"sectionHeading":current_section_heading,"pageNumber":item['pageNumber'],
                                            "offset":item['offset'],
-                                           "sectionContent":item['sectionContent']}
+                                           "content": [selection_content]}
+                
                 results.append(current_section_content)
                 current_section_content = None
                 current_section_heading = None
@@ -385,8 +393,10 @@ def groupSections(json_data: dict):
                         "content": [item['sectionContent']]
                     }
                     results.append(current_section_content)
+                    current_section_content = None
             else:
                 continue
+        #end for loop    
         logging.info(f'Apply last append of current_section_content')
         if current_section_content:
             results.append(current_section_content)
