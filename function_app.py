@@ -1,8 +1,9 @@
+import base64
 from datetime import datetime,date
 import azure.functions as func
 import logging
 import json
-
+import io
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 @app.route(route="http_process_analysis")
@@ -13,11 +14,18 @@ def http_process_analysis(req: func.HttpRequest) -> func.HttpResponse:
     results = []
     if not data:
         return func.HttpResponse(
-             results = {"results":""},status_code=200,)
+             results = {"results":""},status_code=200)
     
     if data:
         logging.info(f'data found.')
+        #DEBUG - for local testing only - COMMENT OUT AFTER TESTING
+        # data_decode = base64.b64encode(data)
+        # data_decode = data_decode.decode('utf-8')
+        #END DEBUG
+
+        #UNCOMMENT AFTER TESTING
         data_decode = data.decode('utf-8')
+        
         json_data = json.loads(data_decode)
         analyzeResult = ""
         if 'analyzeResult' in json_data:
@@ -195,8 +203,10 @@ def extract_tables(json_data: json):
         for table in json_data['tables']:    
             table_kind = None
             #set the kind
-            table_kind = table['cells'][0]['kind'] if len(table['cells'])>0 and 'kind' in table['cells'][0] else 'rowHeader'
-            
+            #table_kind = table['cells'][0]['kind'] if len(table['cells'])>0 and 'kind' in table['cells'][0] else 'rowHeader'
+            #Note: Using column count instead of table kind since the table kind evaluation is sometimes
+            # incorrect depending on the way the table is formatted on the document
+            table_kind = 'rowHeader' if table['columnCount'] <= 2 else 'columnHeader'
             if table_kind is not None:
                 if table_kind == 'columnHeader':
                     current_row = None
@@ -257,22 +267,33 @@ def extract_tables(json_data: json):
                                        "rowIndex":cell['rowIndex'],
                                        "elements":cell['elements']} 
                             contents.append(content)
+
+
                     #for each header, get corresponding content
-                    for i in range(0,len(headers)):
-                        #append all row content to table and set to none
-                        if current_row is not None and 'heading' in current_row:
+
+                    if table_kind == 'rowHeader':
+                        #first column is headers
+                        for i in range(0,len(headers)):
+                            current_row = {"heading":headers[i],"content":[contents[i]]}
+                            #append the current table to the result array  
                             current_table.append(current_row)
                             current_row = None
-                        current_row = {"heading":headers[i],"content":[]}
-                        for j in range(0,len(contents)):
-                            if int(contents[j]['columnIndex'])==i:
-                                current_row['content'].append(contents[j])
-                    current_row = None
-
-                        
-                    #append the current table to the result array  
-                    result.append(current_table)  
-                    continue
+                        result.append(current_table) 
+                    if table_kind == 'columnHeader':
+                        #first row is headers
+                        for i in range(0,len(headers)):
+                            #append all row content to table and set to none
+                            if current_row is not None and 'heading' in current_row:
+                                current_table.append(current_row)
+                                current_row = None
+                            current_row = {"heading":headers[i],"content":[]}
+                            for j in range(0,len(contents)):
+                                if int(contents[j]['columnIndex'])==i:
+                                    current_row['content'].append(contents[j])
+                        current_row = None
+                        #append the current table to the result array  
+                        result.append(current_table)  
+                        continue
            
     return result
 
