@@ -326,11 +326,11 @@ def groupSections(json_data: dict):
             if 'pageNumber' in item:
                 current_page = item['pageNumber']
             else:
-                current_page = '0'
+                current_page = -1
             
             # Page Header
             if 'pageHeader' in item:
-                if 'current_section_content' in locals() and not current_section_content:
+                if 'current_section_content' in locals() and current_section_content:
                     results.append(current_section_content)
                     current_section_content = None
                 current_section_heading = None
@@ -361,10 +361,15 @@ def groupSections(json_data: dict):
                 current_section_content = None
 
             elif 'sectionHeading' in item:
+                #append results and reset the section heading
                 if 'current_section_content' in locals() and current_section_content:
                     results.append(current_section_content)
+                    current_section_content = None
+                    
                 current_section_heading = item['sectionHeading']
-                current_section_content = None
+                current_section_content = {"sectionHeading":current_section_heading,"pageNumber":item['pageNumber'],
+                                        "offset":item['offset'],
+                                        "content": []}
             
             elif 'selectionHeading' in item:
                 selection_content = ''
@@ -414,7 +419,10 @@ def groupSections(json_data: dict):
                         "content": [item['sectionContent']]
                     }
                     results.append(current_section_content)
+                    #clear the content and heading values
                     current_section_content = None
+                    current_section_heading = None
+
             else:
                 continue
         #end for loop    
